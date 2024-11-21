@@ -1,0 +1,122 @@
+services:
+  configSrv:
+    image: mongo:latest
+    container_name: configSrv
+    ports:
+      - "27017:27017"
+    command:
+      [
+        "--configsvr",
+        "--replSet", "config_server",
+        "--bind_ip_all",
+        "--port", "27017"
+      ]
+    volumes:
+      - config-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27017", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - mongo-network
+
+  shard1:
+    image: mongo:latest
+    container_name: shard1
+    ports:
+      - "27018:27018"
+    command:
+      [
+        "--shardsvr",
+        "--replSet", "shard1",
+        "--bind_ip_all",
+        "--port", "27018"
+      ]
+    volumes:
+      - shard1-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27018", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      configSrv:
+        condition: service_healthy
+    networks:
+      - mongo-network
+
+  shard2:
+    image: mongo:latest
+    container_name: shard2
+    ports:
+      - "27019:27019"
+    command:
+      [
+        "--shardsvr",
+        "--replSet", "shard2",
+        "--bind_ip_all",
+        "--port", "27019"
+      ]
+    volumes:
+      - shard2-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27019", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      configSrv:
+        condition: service_healthy
+    networks:
+      - mongo-network
+
+  mongos_router:
+    image: mongo:latest
+    container_name: mongos_router
+    ports:
+      - "27020:27020"
+    command:
+      [
+        "mongos",
+        "--configdb", "config_server/configSrv:27017",
+        "--bind_ip_all",
+        "--port", "27020"
+      ]
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27020", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      shard1:
+        condition: service_healthy
+      shard2:
+        condition: service_healthy
+    networks:
+      - mongo-network
+
+  api_app:
+    build:
+      context: ./api_app
+    container_name: api_app
+    ports:
+      - "8080:8080"
+    environment:
+      MONGODB_URL: mongodb://mongos_router:27020
+      MONGODB_DATABASE_NAME: somedb
+    networks:
+      - mongo-network
+
+volumes:
+  config-data:
+  shard1-data:
+  shard2-data:
+
+networks:
+  mongo-network:
+    driver: bridge
